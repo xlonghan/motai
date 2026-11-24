@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="420" viewBox="0 0 960 420" role="img" aria-label="墨台本地 Markdown 编辑与导出示意">
+  <rect width="960" height="420" rx="24" fill="#edf4f5"/>
+  <rect x="40" y="40" width="880" height="340" rx="12" fill="#fff" stroke="#c9d9df"/>
+  <path d="M52 40h856a12 12 0 0 1 12 12v38H40V52a12 12 0 0 1 12-12" fill="#25333d"/>
+  <circle cx="64" cy="65" r="5" fill="#69b8aa"/><circle cx="82" cy="65" r="5" fill="#8ba8b6"/><circle cx="100" cy="65" r="5" fill="#8ba8b6"/>
+  <text x="130" y="72" fill="#eef7f8" font-size="18" font-family="Segoe UI,Microsoft YaHei,sans-serif">墨台 · Markdown Desk</text>
+  <path d="M480 90v290" stroke="#d9e4e8"/>
+  <text x="70" y="135" fill="#4187a3" font-size="22" font-family="Consolas,monospace"># 本地 Markdown</text>
+  <text x="70" y="180" fill="#475b67" font-size="18" font-family="Consolas,monospace">- 源码与预览</text>
+  <text x="70" y="216" fill="#475b67" font-size="18" font-family="Consolas,monospace">- Mermaid 图表</text>
+  <text x="70" y="252" fill="#475b67" font-size="18" font-family="Consolas,monospace">- HTML / PDF 导出</text>
+  <text x="70" y="330" fill="#7a929e" font-size="15" font-family="Segoe UI,Microsoft YaHei,sans-serif">此图为项目自制 SVG，不加载外部资源。</text>
+  <text x="520" y="140" fill="#253b47" font-size="26" font-weight="600" font-family="Segoe UI,Microsoft YaHei,sans-serif">让想法，清晰呈现</text>
+  <rect x="525" y="205" width="130" height="60" rx="6" fill="#e8f4ef" stroke="#6eaa97"/>
+  <rect x="725" y="205" width="150" height="60" rx="6" fill="#eef0ff" stroke="#9b8ed0"/>
+  <path d="M655 235h56m-9-6 9 6-9 6" fill="none" stroke="#6c8390" stroke-width="2"/>
+  <text x="552" y="242" fill="#315c4e" font-size="18" font-family="Segoe UI,Microsoft YaHei,sans-serif">编写文档</text>
+  <text x="753" y="242" fill="#51476e" font-size="18" font-family="Segoe UI,Microsoft YaHei,sans-serif">预览与分享</text>
+  <text x="525" y="330" fill="#718994" font-size="16" font-family="Segoe UI,Microsoft YaHei,sans-serif">文件留在本机，演示图片可随文档保存。</text>
+</svg>

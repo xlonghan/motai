@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "display",
+  "description": "Allow only the main editor to adjust its page zoom",
+  "windows": ["main"],
+  "permissions": ["core:webview:allow-set-webview-zoom"]
+}

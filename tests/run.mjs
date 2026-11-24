@@ -1,0 +1,17 @@
+import './documents.test.mjs';
+import './runtime.test.mjs';
+import './polish.test.mjs';
+import './settings.test.mjs';
+import './modern-fonts.test.mjs';
+import './page-navigation.test.mjs';
+import './html-export.test.mjs';
+import './performance.test.mjs';
+import './startup.test.mjs';
+import './diagram-cache.test.mjs';
+import './markdown-compat.test.mjs';
+import './builtin.test.mjs';
+import './engine-integration.test.mjs';
+import './repository.test.mjs';
+import './portable-preferences.test.mjs';
+import './preset-state.test.mjs';
+import './preset-catalog.test.mjs';

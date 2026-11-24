@@ -1,0 +1,39 @@
+{
+  "name": "markdown-desk",
+  "private": true,
+  "version": "0.6.1",
+  "type": "module",
+  "scripts": {
+    "build:desktop": "node scripts/build-desktop.mjs",
+    "build:installers": "node scripts/build-installers.mjs",
+    "start": "node scripts/serve.mjs",
+    "dev": "vite --configLoader native --host 127.0.0.1 --port 4318 --strictPort",
+    "build": "vite build --configLoader native",
+    "preview": "vite preview --host 127.0.0.1 --port 4318 --strictPort",
+    "test": "node tests/run.mjs",
+    "demo:update": "node scripts/update-demo-mermaid.mjs",
+    "demo:check": "node scripts/update-demo-mermaid.mjs --check"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4",
+    "@tauri-apps/plugin-clipboard-manager": "2.5.0",
+    "@tauri-apps/plugin-dialog": "2.8.4",
+    "cherry-markdown": "0.11.12",
+    "dompurify": "3.4.17",
+    "katex": "0.19.1",
+    "lucide": "1.78.0",
+    "mermaid": "12.3.0",
+    "pdf-lib": "1.17.1",
+    "playwright-core": "1.65.0",
+    "vue": "3.5.45"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "@vitejs/plugin-vue": "6.0.10",
+    "jsdom": "29.1.1",
+    "vite": "8.3.6"
+  },
+  "engines": {
+    "node": "^22.14.0 || >=24.0.0"
+  }
+}

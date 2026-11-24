@@ -1,0 +1,70 @@
+{
+  "version": "0.5.6",
+  "date": "2026-11-08",
+  "rows": [
+    {
+      "sample": "plain",
+      "beforeMs": [
+        1317,
+        1181,
+        1177
+      ],
+      "beforeMedianMs": 1181,
+      "afterMs": [
+        1038,
+        1002,
+        965
+      ],
+      "afterMedianMs": 1002,
+      "warmMedianMs": null,
+      "engineRequested": [
+        false,
+        false,
+        false
+      ]
+    },
+    {
+      "sample": "common",
+      "beforeMs": [
+        2047,
+        1990,
+        2061
+      ],
+      "beforeMedianMs": 2047,
+      "afterMs": [
+        1847,
+        1179,
+        1169
+      ],
+      "afterMedianMs": 1179,
+      "warmMedianMs": 1174,
+      "engineRequested": [
+        true,
+        false,
+        false
+      ]
+    },
+    {
+      "sample": "file",
+      "beforeMs": [
+        1317,
+        1388,
+        1294
+      ],
+      "beforeMedianMs": 1317,
+      "afterMs": [
+        981,
+        956,
+        958
+      ],
+      "afterMedianMs": 958,
+      "warmMedianMs": null,
+      "engineRequested": [
+        false,
+        false,
+        false
+      ]
+    }
+  ],
+  "conditions": "External launch stopwatch until the isolated EXE reported main window shown; Windows x64; same WebView2 profile, 3 process restarts per case. New isolated data profile for final run; first common run has no SVG cache, later two use it. 600ms cache-write settling is outside observedMs. Not an OS cold-boot benchmark or native frame-presentation capture."
+}

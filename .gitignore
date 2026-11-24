@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.cache/
+.artifacts/
+*.local
+src-tauri/gen/
+src-tauri/target/
+output/
+*.log
+*.pid
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db

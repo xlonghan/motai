@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>墨台 · 正在启动</title>
+    <link rel="stylesheet" href="/splash.css" />
+  </head>
+  <body>
+    <main class="splash-card" aria-label="墨台启动窗口">
+      <button class="splash-close" id="splash-close" aria-label="取消启动" title="取消启动"></button>
+      <div class="splash-grid" aria-hidden="true"></div>
+      <section class="splash-brand">
+        <div class="brand-lockup"><img src="/favicon.svg" alt="" width="62" height="62" draggable="false"/><div><h1>墨台</h1><p>MARKDOWN DESK</p></div></div>
+        <h2>让想法，清晰呈现。</h2>
+        <p class="brand-subtitle">专注书写，随时预览。<br/>你的文档，始终留在本机。</p>
+        <div class="feature-line"><span>Markdown</span><i></i><span>Mermaid</span><i></i><span>本地文档</span></div>
+      </section>
+      <div class="splash-art" aria-hidden="true">
+        <svg viewBox="0 0 390 400" fill="none">
+          <rect class="paper-back" x="69" y="33" width="277" height="338" rx="13" transform="rotate(7 69 33)"/>
+          <rect class="paper" x="39" y="20" width="285" height="350" rx="13"/>
+          <path class="paper-rule" d="M39 62h285"/>
+          <circle class="art-dot" cx="61" cy="41" r="3"/><circle class="art-dot" cx="74" cy="41" r="3"/><circle class="art-dot" cx="87" cy="41" r="3"/>
+          <text class="art-heading" x="63" y="105"># Markdown</text>
+          <path class="art-line" d="M63 124h198M63 138h162M63 152h180"/>
+          <rect class="art-code" x="62" y="178" width="238" height="62" rx="6"/>
+          <text class="art-code-text" x="76" y="203">ideas.map(write)</text><path class="art-code-line" d="M77 220h114"/>
+          <path class="art-connector" d="M126 285h28m50 0h27m-27 0v37h27"/>
+          <path class="art-arrow" d="m149 281 5 4-5 4m77-8 5 4-5 4m-5 29 5 4-5 4"/>
+          <rect class="art-node" x="63" y="269" width="63" height="32" rx="5"/><path class="art-node" d="m179 263 25 22-25 22-25-22z"/>
+          <rect class="art-node" x="231" y="269" width="63" height="32" rx="5"/><rect class="art-node muted" x="231" y="307" width="63" height="30" rx="5"/>
+          <path class="art-node-line" d="M79 285h30M248 285h29M248 322h29"/>
+          <rect class="art-tag" x="16" y="331" width="118" height="36" rx="7"/><text class="art-tag-text" x="33" y="354">Mermaid</text>
+          <path class="art-spark" d="M341 110v18m-9-9h18M15 188v12m-6-6h12"/>
+        </svg>
+      </div>
+      <section class="splash-status" role="status" aria-live="polite">
+        <div class="status-row"><span class="status-light"></span><strong id="splash-title">正在启动</strong></div>
+        <p id="splash-detail" class="status-detail">正在准备编辑器和本地工作区…</p>
+        <div class="splash-progress" aria-hidden="true"><span></span></div>
+        <div class="splash-actions"><button id="splash-continue" hidden>先打开编辑器</button><button id="splash-retry" hidden>重试</button></div>
+      </section>
+      <footer><span>离线 Markdown 工作台</span><span id="splash-version"></span></footer>
+    </main>
+    <script type="module" src="/src/splash.js"></script>
+  </body>
+</html>

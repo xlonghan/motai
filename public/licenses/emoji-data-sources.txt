@@ -1,0 +1,7 @@
+Unicode Emoji 18.0
+Source: https://www.unicode.org/Public/emoji/latest/emoji-test.txt
+Chinese names/keywords: CLDR 49.0.0 (cldr-annotations-full and cldr-annotations-derived-full).
+Unicode License: Unicode-LICENSE.txt
+
+Categories retain all 10 groups and 100 subgroups from emoji-test 18.0, including 9 Emoji_Component entries. Chinese subgroup labels are local UI translations.
+Offline flag font attribution: emoji-flags.txt and Noto-Emoji-OFL.txt.

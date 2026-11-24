@@ -1,0 +1,8 @@
+Markdown Desk Flags
+
+Subset of Noto Color Emoji, Google Fonts version v50.
+Source: https://fonts.googleapis.com/css2?family=Noto+Color+Emoji
+SIL Open Font License 1.1: see Noto-Emoji-OFL.txt.
+Modified font family name: Markdown Desk Flags.
+Only flag-related Unicode characters and required shaping/color glyphs are retained.
+Original font copyright and license metadata are preserved in the font.
