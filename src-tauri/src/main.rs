@@ -39,7 +39,7 @@ fn main() {
         .setup(|app|{activity::started(app)?;startup::install_watchdog(app)})
         .on_window_event(startup::on_window_event)
         .invoke_handler(tauri::generate_handler![
-            files::read_document, files::write_text, files::read_image,
+            files::read_document, files::document_disk_stamps, files::write_text, files::read_image,
             files::relative_document_path, files::load_workspace, files::save_workspace,
             files::take_launch_paths, files::open_external,
             files::load_startup_data, diagram_cache::save_diagram_cache,

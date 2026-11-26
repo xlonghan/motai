@@ -65,7 +65,7 @@ async fn check(app:&tauri::AppHandle,window:&tauri::WebviewWindow)->Result<serde
     assert!(!PathBuf::from(first.path).exists());assert_eq!(renamed.markdown,secret);
     let export=portable_runtime::default_save_path(app.clone(),window.clone(),"test.html".into(),"html".into())?;
     assert_eq!(PathBuf::from(&export),paths.exports.join("html/test.html"));
-    files::write_text(window.clone(),export,"<html><body>test</body></html>".into(),None)?;
+    files::write_text(window.clone(),export,"<html><body>test</body></html>".into(),None,None)?;
     files::save_workspace(app.clone(),window.clone(),json!({"documents":[{"name":renamed.name,"path":renamed.path,"markdown":secret,"managed":true}]})).await?;
     let saved=files::load_workspace(app.clone(),window.clone())?.unwrap();assert_eq!(saved["portableRoot"],paths.root.display().to_string());
     files::save_workspace(app.clone(),window.clone(),json!({"activeId":"preset-check","openDocumentIds":["preset-check"],"documents":[{"id":"preset-check","name":"demo.md","path":updated.path,"markdown":"stale draft","preset":true}]})).await?;

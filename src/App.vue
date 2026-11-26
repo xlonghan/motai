@@ -10,7 +10,7 @@ import { DiagramCache } from './diagram-cache.js';
 import { dependencies as libraryVersions,version as appVersion } from '../package.json';
 import { createMarkdownCompatibility, cleanHtmlImageSpacing, normalizeWikiFragments, prepareReadOnlyMarkdown, parseWikiLink, resolveWikiDocument } from './markdown-compat.js';
 import {builtinDocumentRecords,builtinRecord,isPresetDocument,createPresetTree,presetEntryKey} from './preset-catalog.js';
-import {documentDigest,presetRefresh,legacyPresetId} from './preset-state.js';
+import {compareDiskVersion,documentDigest,presetRefresh,legacyPresetId} from './preset-state.js';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import 'cherry-markdown/dist/cherry-markdown.css';
@@ -182,9 +182,24 @@ let resetScrollOnRender = true;
 let desktopCleanup = () => {};
 let cherryIconCleanup = () => {};
 const fileHandles = new Map();
+const diskChanges = reactive(new Map());
+const diskOperations = reactive(new Set());
+const diskChangeDialog = ref(null);
+const diskReloadMessage = ref('');
+const observedDiskStamps = new Map();
+const pendingDiskReads = new Map();
+let diskCheckTimer;
+let checkingOpenDiskFiles = false;
+let forceDiskCheckPending = false;
 const fontWheelTime = {editor:0,preview:0};
 
 const active = computed(() => documents.value.find((document) => document.id === activeId.value));
+const activeDiskChange = computed(() => diskChanges.get(activeId.value));
+const showDiskChange = computed(() => hasUnacknowledgedDiskChange(active.value));
+const showDiskChangeDialog = computed(() => showDiskChange.value && !loading.value && !settingsActive.value &&
+  !renameId.value && !deletingId.value && !showHelp.value && !diagramViewer.value && !htmlSnapshot.value && !printHtml.value);
+const diskReloadNeedsBackup = computed(() => Boolean(activeDiskChange.value &&
+  (activeDiskChange.value.kind !== 'clean' || active.value?.markdown !== activeDiskChange.value.cleanDraft)));
 const openDocuments = computed(() => openDocumentIds.value.map((id) => documents.value.find((document) => document.id === id)).filter(Boolean));
 const activeDirectory = computed(() => active.value?.path?.replace(/[/\\][^/\\]+$/, '') || '本地文档');
 const currentPresetKey=computed(()=>presetEntryKey(active.value,presetEntries.value,nativeStorageInfo.value?.builtin));
@@ -202,6 +217,17 @@ const renderLabel = computed(() => diagramError.value ? '有图表未渲染，�
 watch([() => settingsActive.value?'设置':active.value?.name, theme], ([name, currentTheme]) => {
   platform.updateWindow(name ? `${name} - 墨台` : '墨台', currentTheme).catch(console.error);
 }, { immediate: true });
+
+watch(showDiskChangeDialog, visible => {
+  const dialog = diskChangeDialog.value;
+  if (!dialog) return;
+  if (visible && !dialog.open) {
+    diskReloadMessage.value = '';
+    menu.value = '';
+    contextMenu.value = null;
+    dialog.showModal();
+  } else if (!visible && dialog.open) dialog.close();
+}, { flush: 'post' });
 
 function notify(message) {
   toast.value = message;
@@ -445,26 +471,33 @@ function renderingFinished(markdown,refresh) {
   }
 }
 
-async function activateDocument(id) {
+async function activateDocument(id, checkDisk = true) {
   if (busy.value || !documents.value.some((document) => document.id === id)) return;
-  if (!openDocumentIds.value.includes(id)) openDocumentIds.value.push(id);
+  if (!openDocumentIds.value.includes(id)) {
+    openDocumentIds.value.push(id);
+    if (checkDisk && cherry && !diskOperations.has(id)) void checkDocumentDisk(documents.value.find(document => document.id === id)).catch(() => {});
+  }
   settingsActive.value=false;
   nextTick(requestEditorMeasure);
   if (activeId.value === id) return;
   rememberRecent(documents.value.find((document) => document.id === id));
   if (active.value && cherry) active.value.markdown = editorMarkdown(cherry);
-  discardDiagramRefresh();
   activeId.value = id;
   loadedDocument = id;
+  showEditorDocument(active.value.markdown);
+  schedulePersist();
+}
+
+function showEditorDocument(markdown) {
+  discardDiagramRefresh();
   lastRenderedMarkdown = null;
-  lastRenderedDocument='';lastRenderedConfigVersion=-1;
+  lastRenderedDocument='';lastRenderedConfigVersion=-1;lastRenderedSourceDoc=null;
   rendering.value = true;
   diagramError.value = false;
   renderedDiagrams.value = 0;
   resetScrollOnRender = true;
-  cherry?.setValue(active.value.markdown);
+  cherry?.setValue(markdown);
   cherry?.clearUndoRedo();
-  schedulePersist();
 }
 
 async function closeDocumentTab(id) {
@@ -590,6 +623,9 @@ async function applyRename() {
         const result=await platform.renameManagedDocument(reference,safeFileName(renameValue.value));
         fileHandles.set(document.id,result.reference);
         Object.assign(document,{name:result.name,...result.reference});
+        observedDiskStamps.delete(document.id);
+        diskChanges.delete(document.id);
+        delete document.dismissedDiskHash;
         for(const recent of recentFiles.value)if(recent.path===oldPath)Object.assign(recent,{name:result.name,...result.reference});
       }else document.name = safeFileName(renameValue.value);
       document.updatedAt = Date.now();schedulePersist();
@@ -608,17 +644,176 @@ async function removeDocument() {
   documents.value = documents.value.filter((document) => document.id !== id);
   openDocumentIds.value = openDocumentIds.value.filter((item) => item !== id);
   fileHandles.delete(id);
+  diskChanges.delete(id);
+  observedDiskStamps.delete(id);
   recentFiles.value = recentFiles.value.filter(entry=>entry.id!==id || entry.path);
   await persist();
+}
+
+function liveDocumentMarkdown(document) {
+  return activeId.value === document.id && cherry ? editorMarkdown(cherry) : document.markdown;
+}
+
+function nativeEditableDocument(document) {
+  return platform.native && document?.path && !document.preset;
+}
+
+function hasUnacknowledgedDiskChange(document) {
+  const change = diskChanges.get(document?.id);
+  return Boolean(change && change.hash !== document.dismissedDiskHash);
+}
+
+function trackDiskBaseline(document, reference, hash) {
+  Object.assign(document, reference, { diskHash: hash });
+  fileHandles.set(document.id, reference);
+  observedDiskStamps.set(document.id, reference.diskStamp);
+  diskChanges.delete(document.id);
+  delete document.dismissedDiskHash;
+}
+
+async function checkDocumentDisk(document, incoming = null, draftToCompare = null) {
+  if (!nativeEditableDocument(document)) return;
+  const { id } = document;
+  const original = fileHandles.get(id);
+  const read = Symbol();
+  pendingDiskReads.set(id, read);
+  try {
+    if (!incoming) {
+      const selection = await platform.openDocumentPath(document.path);
+      incoming = { markdown: await selection.file.text(), reference: selection.reference };
+    }
+    const hash = incoming.hash ?? await documentDigest(incoming.markdown);
+    const baseline = document.diskHash;
+    const draft = draftToCompare ?? liveDocumentMarkdown(document);
+    const draftHash = hash === baseline ? baseline : await documentDigest(draft);
+    if (pendingDiskReads.get(id) !== read || fileHandles.get(id) !== original ||
+        document.path.toLowerCase() !== incoming.reference.path.toLowerCase()) return;
+    const kind = compareDiskVersion({ baseline, draft: draftHash, incoming: hash });
+    if (kind === 'current') {
+      diskChanges.delete(id);
+      if (document.diskHash !== hash || document.diskStamp !== incoming.reference.diskStamp || document.dismissedDiskHash) {
+        trackDiskBaseline(document, incoming.reference, hash);
+        schedulePersist();
+      }
+    } else {
+      diskChanges.set(id, { hash, kind, cleanDraft: kind === 'clean' ? draft : null });
+    }
+    observedDiskStamps.set(id, incoming.reference.diskStamp);
+    return { ...incoming, hash, kind };
+  } finally {
+    if (pendingDiskReads.get(id) === read) pendingDiskReads.delete(id);
+  }
+}
+
+async function checkOpenDiskFiles(force = false) {
+  if (startupCancelled) return;
+  if (checkingOpenDiskFiles) {
+    forceDiskCheckPending ||= force;
+    return;
+  }
+  const open = openDocuments.value.filter(document => nativeEditableDocument(document) && !diskOperations.has(document.id));
+  if (!open.length) return;
+  checkingOpenDiskFiles = true;
+  try {
+    const stamps = force ? [] : await platform.documentDiskStamps(open.map(document => document.path));
+    await Promise.allSettled(open.map((document, index) => {
+      if (diskOperations.has(document.id) || pendingDiskReads.has(document.id)) return;
+      if (force) return checkDocumentDisk(document);
+      const stamp = stamps[index];
+      if (!stamp) observedDiskStamps.delete(document.id);
+      else if (stamp !== observedDiskStamps.get(document.id)) return checkDocumentDisk(document);
+    }));
+  } catch (error) {
+    console.warn(error);
+  } finally {
+    checkingOpenDiskFiles = false;
+    if (forceDiskCheckPending) {
+      forceDiskCheckPending = false;
+      void checkOpenDiskFiles(true);
+    }
+  }
+}
+
+function checkDiskOnFocus() { void checkOpenDiskFiles(true); }
+
+async function openWorkspaceDocument(document) {
+  await activateDocument(document.id, false);
+  if (!diskOperations.has(document.id)) await checkDocumentDisk(document).catch(() => {});
+}
+
+function dismissDiskChange() {
+  if (!activeDiskChange.value || diskOperations.has(activeId.value)) return;
+  active.value.dismissedDiskHash = activeDiskChange.value.hash;
+  schedulePersist();
+}
+
+function showDismissedDiskChange() {
+  menu.value = '';
+  delete active.value.dismissedDiskHash;
+  schedulePersist();
+}
+
+async function requestDiskReload(document) {
+  if (busy.value || !diskChanges.has(document.id) || diskOperations.has(document.id)) return;
+  await activateDocument(document.id, false);
+  if (activeId.value !== document.id || !diskChanges.has(document.id)) return;
+  if (diskReloadNeedsBackup.value) {
+    showDismissedDiskChange();
+    return;
+  }
+  await reloadDiskDocument(false);
+}
+
+async function reloadDiskDocument(allowBackup) {
+  const document = active.value;
+  if (!document || diskOperations.has(document.id)) return;
+  diskReloadMessage.value = '';
+  diskOperations.add(document.id);
+  try {
+    const incoming = await checkDocumentDisk(document);
+    if (!incoming || incoming.kind === 'current') return;
+    const draft = liveDocumentMarkdown(document);
+    const reference = fileHandles.get(document.id);
+    if (incoming.kind !== 'clean' || draft !== diskChanges.get(document.id)?.cleanDraft) {
+      if (!allowBackup) {
+        if (activeId.value === document.id) showDismissedDiskChange();
+        return;
+      }
+      const backup = createDocument(document.name.replace(/\.md$/i, '') + '（磁盘更新前草稿）.md', draft);
+      documents.value.unshift(backup);
+      try {
+        await flushWorkspace();
+      } catch (error) {
+        documents.value = documents.value.filter(item => item.id !== backup.id);
+        throw error;
+      }
+      if (liveDocumentMarkdown(document) !== draft) {
+        diskReloadMessage.value = '草稿已备份。编辑内容在备份期间又有变化，请重新确认载入。';
+        return;
+      }
+    }
+    if (fileHandles.get(document.id) !== reference) return;
+    trackDiskBaseline(document, incoming.reference, incoming.hash);
+    document.markdown = incoming.markdown;
+    if (activeId.value === document.id) showEditorDocument(incoming.markdown);
+    schedulePersist();
+  } catch (error) {
+    const message = '重新载入失败：' + (error.message || String(error));
+    if (activeId.value === document.id && diskChangeDialog.value?.open) diskReloadMessage.value = message;
+    else notify(message);
+  } finally {
+    diskOperations.delete(document.id);
+  }
 }
 
 async function importFile(file, handle = null, context = {}) {
   if (context.folderKey) {
     const existing = documents.value.find(document=>document.folderKey===context.folderKey);
-    if(existing){await activateDocument(existing.id);return existing;}
+    if(existing){await openWorkspaceDocument(existing);return existing;}
   }
   if (file.size > 15 * 1024 * 1024) throw new Error('单个文档请控制在 15 MB 以内');
   const markdown = await file.text();
+  const diskHash = handle?.path ? await documentDigest(markdown) : null;
   if (handle?.path) {
     const existing = documents.value.find((document) => document.path?.toLowerCase() === handle.path.toLowerCase());
     if (existing) {
@@ -638,17 +833,19 @@ async function importFile(file, handle = null, context = {}) {
           }
         }
         schedulePersist();
+      } else if (!diskOperations.has(existing.id)) {
+        await checkDocumentDisk(existing, { markdown, reference: handle, hash: diskHash });
       }
-      await activateDocument(existing.id); return existing;
+      await activateDocument(existing.id, false); return existing;
     }
   }
   const document = Object.assign(createDocument(file.name, markdown),context);
   document.name = file.name;
   document.imported = true;
-  if (handle?.path) { document.path = handle.path; document.modified = handle.modified; document.managed=handle.managed;document.preset=handle.preset;document.name = file.name;if(handle.preset)document.diskHash=await documentDigest(markdown); }
+  if (handle?.path) trackDiskBaseline(document, handle, diskHash);
   documents.value.unshift(document);
   if (handle) fileHandles.set(document.id, handle);
-  await activateDocument(document.id);
+  await activateDocument(document.id, false);
   rememberRecent(document);
   return document;
 }
@@ -680,11 +877,27 @@ async function saveMarkdown(asNew = false) {
   if(settingsActive.value){await flushSettings();notify(settingsSaveError.value||'设置已保存');return;}
   if (!active.value || busy.value) return;
   const document = active.value;
+  if (diskOperations.has(document.id)) return;
   const markdown = editorMarkdown(cherry);
+  diskOperations.add(document.id);
   try {
+    if (!asNew && nativeEditableDocument(document)) {
+      const incoming = await checkDocumentDisk(document, null, markdown);
+      if (!incoming) throw new Error('无法确认磁盘版本，请重试');
+      if (incoming.kind !== 'current') {
+        delete document.dismissedDiskHash;
+        schedulePersist();
+        throw new Error('磁盘内容与编辑内容存在冲突，请确认重新载入或另存为');
+      }
+    }
     const result = await platform.saveMarkdown({ name: document.name, markdown, reference: fileHandles.get(document.id), saveAs: asNew });
-    if (result.reference) fileHandles.set(document.id, result.reference);
-    if (result.reference?.path) { document.path = result.reference.path; document.modified = result.reference.modified;document.managed=result.reference.managed;document.preset=result.reference.preset;if(document.preset)document.diskHash=await documentDigest(markdown);else delete document.diskHash; }
+    if (result.reference?.path) {
+      const hash = await documentDigest(markdown);
+      trackDiskBaseline(document, result.reference, hash);
+      if (result.diskMarkdown !== undefined && await documentDigest(result.diskMarkdown) !== hash) {
+        await checkDocumentDisk(document, { markdown: result.diskMarkdown, reference: result.reference });
+      }
+    } else if (result.reference) fileHandles.set(document.id, result.reference);
     document.name = result.name;
     if(asNew||!platform.native&&result.reference)delete document.builtinId;
     rememberRecent(document);
@@ -692,6 +905,8 @@ async function saveMarkdown(asNew = false) {
     await persist();
   } catch (error) {
     if (error.name !== 'AbortError') notify(`保存失败：${error.message}`);
+  } finally {
+    diskOperations.delete(document.id);
   }
 }
 
@@ -927,7 +1142,7 @@ async function refreshFolder() {
 }
 async function openFolderFile(entry) {
   const existing = documents.value.find((document) => document.folderKey === entry.id || document.path === entry.path);
-  if (existing) { await activateDocument(existing.id); return; }
+  if (existing) { await openWorkspaceDocument(existing); return; }
   try {
     const selection = await folderSelection(entry);
     const document = await importFile(selection.file,selection.reference,{folderKey:entry.id,folderLocation:entry.path});
@@ -948,7 +1163,7 @@ function rememberRecent(document) {
 async function openRecent(entry) {
   menu.value = '';
   const existing = documents.value.find((document)=>document.id===entry.id || entry.path && document.path===entry.path);
-  if (existing) { await activateDocument(existing.id); return; }
+  if (existing) { await openWorkspaceDocument(existing); return; }
   if (platform.native && entry.path) {
     try { const selection=await platform.openDocumentPath(entry.path); await importFile(selection.file,selection.reference); }
     catch (error) { notify(error.message || String(error)); }
@@ -1120,6 +1335,7 @@ function openContextMenu(event) {
     if (!document) return;
     items = [
       item('打开文档', 'file', () => activateDocument(id)),
+      ...(diskChanges.has(id) ? [item('重新载入磁盘版本', 'refresh', () => requestDiskReload(document), diskOperations.has(id))] : []),
       item('重命名…', 'file', () => beginRename(document)),
       item('复制路径','copy',()=>platform.writeClipboard(document.path || document.folderLocation || document.name)),
       separator,
@@ -1173,6 +1389,10 @@ function closeMenus(event) {
 
 function keyboard(event) {
   const ctrl=event.ctrlKey||event.metaKey;
+  if (diskChangeDialog.value?.open) {
+    if (ctrl) event.preventDefault();
+    return;
+  }
   if(ctrl&&event.key===','){event.preventDefault();openSettings();return;}
   if(htmlSnapshot.value){
     if(event.key==='Escape'||ctrl&&event.key.toLowerCase()==='w'){event.preventDefault();closeHtmlPreview();}
@@ -1303,7 +1523,7 @@ onMounted(async () => {
     }
     for(const document of documents.value){const legacy=await legacyPresetId(document);if(legacy)document.builtinId=legacy;}
     for (const document of documents.value) {
-      if (document.path) fileHandles.set(document.id, { path: document.path, modified: document.modified,managed:document.managed,preset:document.preset });
+      if (document.path) fileHandles.set(document.id, { path: document.path, modified: document.modified, diskStamp: document.diskStamp,managed:document.managed,preset:document.preset });
     }
     openDocumentIds.value = Array.isArray(saved?.openDocumentIds)
       ? [...new Set(saved.openDocumentIds)].filter((id) => documents.value.some((document) => document.id === id))
@@ -1313,7 +1533,7 @@ onMounted(async () => {
     activeId.value = openDocumentIds.value.includes(saved?.activeId) ? saved.activeId : openDocumentIds.value[0] || '';
     if(!activeId.value)sidebarTab.value='files';
     // Resolve OS launch files before Cherry exists, retaining any matching draft.
-    for(const document of startupData?.documents||[])await importFile(new File([document.markdown],document.name,{type:'text/markdown'}),{path:document.path,modified:document.modified,managed:document.managed,preset:document.preset});
+    for(const document of startupData?.documents||[])await importFile(new File([document.markdown],document.name,{type:'text/markdown'}),{path:document.path,modified:document.modified,diskStamp:document.diskStamp,managed:document.managed,preset:document.preset});
     for(const error of startupData?.errors||[])notify(error);
     loadedDocument = activeId.value;
     // The restored settings are now complete. Save them while building the editor.
@@ -1382,7 +1602,12 @@ onMounted(async () => {
     await startupPreferences;
     if(initialSettings.invalid)notify('已使用可用的默认设置，可在设置页重新调整');
     systemTheme.addEventListener('change',themeChanged);
-    if(platform.native)window.addEventListener('focus',refreshFileAssociation);
+    if (platform.native) {
+      window.addEventListener('focus', refreshFileAssociation);
+      window.addEventListener('focus', checkDiskOnFocus);
+      checkDiskOnFocus();
+      diskCheckTimer = setInterval(() => void checkOpenDiskFiles(), 2500);
+    }
     window.addEventListener('pagehide',flushSettings);
     window.addEventListener('pagehide',saveOptionalDiagramCache);
     document.addEventListener('click', closeMenus);
@@ -1413,6 +1638,8 @@ onBeforeUnmount(() => {
   clearTimeout(mermaidSettingsTimer);
   systemTheme.removeEventListener('change',themeChanged);
   window.removeEventListener('focus',refreshFileAssociation);
+  window.removeEventListener('focus',checkDiskOnFocus);
+  clearInterval(diskCheckTimer);
   window.removeEventListener('pagehide',flushSettings);
   window.removeEventListener('pagehide',saveOptionalDiagramCache);
   clearTimeout(persistTimer);
@@ -1440,6 +1667,7 @@ onBeforeUnmount(() => {
             <button @click="openFolder"><Icon name="folder-open" />打开文件夹…<kbd>Ctrl+Alt+O</kbd></button>
             <button v-if="!platform.native" @click="menu='';folderInput.click()"><Icon name="download" />导入文件夹副本…</button>
             <button @click="menu='recent'"><Icon name="clock" />最近打开<Icon name="arrow" :size="13" /></button>
+            <button v-if="activeDiskChange && !showDiskChange" @click="showDismissedDiskChange"><Icon name="refresh" />重新载入磁盘版本…</button>
             <div class="menu-separator"></div>
             <button :disabled="!active" @click="menu = ''; saveMarkdown()"><Icon name="save" />保存<kbd>Ctrl+S</kbd></button>
             <button :disabled="!active" @click="menu = ''; saveMarkdown(true)"><Icon name="save" />另存为…<kbd>Ctrl+Shift+S</kbd></button>
@@ -1590,7 +1818,8 @@ onBeforeUnmount(() => {
           <button v-if="!sidebar" class="tool-button reopen-sidebar" title="展开侧栏" aria-label="展开侧栏" @click="toggleSidebar"><Icon name="panel" :size="16" /></button>
           <div class="document-tabs" role="tablist" aria-label="打开的文档">
             <div v-for="document in openDocuments" :key="document.id" class="document-tab" :data-tab-id="document.id" :class="{ active: !settingsActive && activeId === document.id }">
-              <button class="tab-label" role="tab" :aria-selected="!settingsActive && activeId === document.id" :title="document.path || document.name" @click="activateDocument(document.id)" @dblclick="beginRename(document)"><Icon name="markdown" :size="15" /><span>{{ document.name }}</span></button>
+              <button class="tab-label" role="tab" :aria-selected="!settingsActive && activeId === document.id" :title="document.path || document.name" @click="activateDocument(document.id)" @dblclick="beginRename(document)"><Icon name="markdown" :size="15" /><span>{{ document.name }}</span><span v-if="hasUnacknowledgedDiskChange(document)" class="disk-change-dot" role="img" aria-label="磁盘版本已更新" title="磁盘版本已更新"></span></button>
+              <button v-if="diskChanges.has(document.id)" class="tab-disk-reload" type="button" :aria-label="`重新载入 ${document.name}`" title="重新载入磁盘版本" :disabled="diskOperations.has(document.id)" @click="requestDiskReload(document)"><Icon name="refresh" :size="14" /></button>
               <button class="tab-close" :aria-label="`关闭 ${document.name}`" title="关闭标签页（草稿会保留）" @click="closeDocumentTab(document.id)"><Icon name="close" :size="12" /></button>
             </div>
           </div>
@@ -1619,6 +1848,16 @@ onBeforeUnmount(() => {
     <EmojiPicker :preferences="settings" :persist="persistEmojiPreferences" :on-save-error="notify" @setting="updateSetting" v-if="showEmoji" @select="insertEmoji" @close="showEmoji=false" />
     <input ref="folderInput" type="file" webkitdirectory multiple hidden @change="folderImported" />
     <input ref="input" type="file" accept=".md,.markdown,.txt" multiple hidden @change="imported" />
+    <dialog ref="diskChangeDialog" class="dialog disk-change-dialog" role="alertdialog" aria-modal="true" aria-labelledby="disk-change-title" aria-describedby="disk-change-file disk-change-description" @cancel.prevent="dismissDiskChange">
+      <h2 id="disk-change-title">{{ activeDiskChange?.kind === 'unknown' ? '磁盘内容与旧工作区草稿不同' : '文件已在磁盘上更改' }}</h2>
+      <p id="disk-change-file" class="disk-change-file" :title="active?.path">{{ active?.name }}</p>
+      <p id="disk-change-description">{{ diskReloadNeedsBackup ? '重新载入会替换当前内容。选择备份后，可以在工作区找回当前草稿。' : '重新载入后，编辑区和预览将显示磁盘上的最新内容。' }}</p>
+      <p v-if="diskReloadMessage" class="disk-change-message" role="alert">{{ diskReloadMessage }}</p>
+      <div class="dialog-actions">
+        <button type="button" class="secondary-button" autofocus :disabled="diskOperations.has(activeId)" @click="dismissDiskChange">{{ diskReloadNeedsBackup ? '保留当前草稿' : '稍后' }}</button>
+        <button type="button" class="primary-button" :disabled="diskOperations.has(activeId)" @click="reloadDiskDocument(diskReloadNeedsBackup)">{{ diskReloadNeedsBackup ? '备份草稿并重新载入' : '重新载入' }}</button>
+      </div>
+    </dialog>
     <div v-if="toast" class="toast" role="status"><Icon name="check" :size="16" />{{ toast }}<button aria-label="关闭提示" @click="toast = ''"><Icon name="close" :size="14" /></button></div>
     <div v-if="renameId" class="modal-backdrop" @click.self="renameId = ''"><form class="dialog rename-dialog" @submit.prevent="applyRename"><h2>重命名文档</h2><p>修改工作区名称，不会重命名磁盘上的文件。</p><label class="rename-input"><input v-model="renameValue" aria-label="文档名称" autofocus maxlength="100" /><span>.md</span></label><div class="dialog-actions"><button type="button" class="secondary-button" @click="renameId = ''">取消</button><button type="submit" class="primary-button">确定</button></div></form></div>
     <div v-if="deletingId" class="modal-backdrop" @click.self="deletingId = ''"><div class="dialog"><h2>删除草稿</h2><p>移除「{{ deletedDocument?.name }}」在工作区中的草稿。已保存到磁盘的文件不受影响。</p><div class="dialog-actions"><button class="secondary-button" @click="deletingId = ''">取消</button><button class="danger-button" @click="removeDocument">删除草稿</button></div></div></div>

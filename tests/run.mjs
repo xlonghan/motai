@@ -15,3 +15,4 @@ import './repository.test.mjs';
 import './portable-preferences.test.mjs';
 import './preset-state.test.mjs';
 import './preset-catalog.test.mjs';
+import './document-disk-state.test.mjs';

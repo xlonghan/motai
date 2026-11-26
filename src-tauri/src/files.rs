@@ -1,6 +1,6 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde::Serialize;
-use std::{fs, io::Write, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::UNIX_EPOCH};
+use std::{fs, io::{Read, Write}, path::{Path, PathBuf}, sync::{Mutex, atomic::{AtomicU64, Ordering}}, time::UNIX_EPOCH};
 use tauri::{AppHandle, Manager, WebviewWindow};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -29,6 +29,7 @@ pub struct NativeDocument {
     pub path: String,
     pub markdown: String,
     pub modified: u64,
+    pub disk_stamp: String,
     pub managed: bool,
     pub preset: bool,
 }
@@ -45,6 +46,20 @@ pub fn modified(path: &Path) -> u64 {
     fs::metadata(path).and_then(|metadata| metadata.modified()).ok()
         .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
         .map(|time| time.as_millis() as u64).unwrap_or(0)
+}
+
+fn disk_stamp(metadata: &fs::Metadata) -> Option<String> {
+    if !metadata.is_file() { return None; }
+    let time = metadata.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
+    Some(format!("{}:{}", time.as_nanos(), metadata.len()))
+}
+
+#[tauri::command]
+pub async fn document_disk_stamps(window: WebviewWindow, paths: Vec<String>) -> Result<Vec<Option<String>>, String> {
+    ensure_main(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        paths.iter().map(|path| fs::metadata(path).ok().and_then(|metadata| disk_stamp(&metadata))).collect()
+    }).await.map_err(|error| error.to_string())
 }
 
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -98,9 +113,16 @@ pub fn read_document(window: WebviewWindow, path: String) -> Result<NativeDocume
     let path = fs::canonicalize(path).map_err(|error| format!("无法打开文件：{error}"))?;
     let extension = path.extension().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
     if !["md", "markdown", "txt", "mdown", "mkd"].contains(&extension.as_str()) { return Err("请选择 Markdown 或文本文件".into()); }
-    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
+    let file = fs::File::open(&path).map_err(|error| error.to_string())?;
+    let metadata = file.metadata().map_err(|error| error.to_string())?;
     if !metadata.is_file() || metadata.len() > 15 * 1024 * 1024 { return Err("文档不能超过 15 MB".into()); }
-    let bytes = fs::read(&path).map_err(|error| error.to_string())?;
+    let stamp = disk_stamp(&metadata);
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(15 * 1024 * 1024 + 1).read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if bytes.len() > 15 * 1024 * 1024 { return Err("文档不能超过 15 MB".into()); }
+    if fs::metadata(&path).ok().and_then(|metadata| disk_stamp(&metadata)) != stamp {
+        return Err("磁盘文件正在变化，请稍后重新打开".into());
+    }
     let markdown = if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) {
         let little = bytes[0] == 0xff;
         let units = bytes[2..].chunks_exact(2).map(|pair| if little { u16::from_le_bytes([pair[0], pair[1]]) } else { u16::from_be_bytes([pair[0], pair[1]]) }).collect::<Vec<_>>();
@@ -110,7 +132,8 @@ pub fn read_document(window: WebviewWindow, path: String) -> Result<NativeDocume
     };
     let managed=window.try_state::<crate::portable_runtime::PortableStorage>().and_then(|storage|fs::canonicalize(&storage.paths.documents).ok()).is_some_and(|directory|path.starts_with(directory));
     let preset=window.try_state::<crate::portable_runtime::PortableStorage>().and_then(|storage|fs::canonicalize(&storage.paths.builtin).ok()).is_some_and(|directory|path.starts_with(directory));
-    operation.finish(Ok(NativeDocument { name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path: path.to_string_lossy().into_owned(), markdown, modified: modified(&path), managed,preset }))
+    let modified = metadata.modified().ok().and_then(|time| time.duration_since(UNIX_EPOCH).ok()).map(|time| time.as_millis() as u64).unwrap_or(0);
+    operation.finish(Ok(NativeDocument { name: path.file_name().unwrap_or_default().to_string_lossy().into_owned(), path: path.to_string_lossy().into_owned(), markdown, modified, disk_stamp: stamp.unwrap_or_default(), managed,preset }))
 }
 
 #[tauri::command]
@@ -145,14 +168,18 @@ pub fn rename_managed_document(app:AppHandle,window:WebviewWindow,path:String,na
 }
 
 #[tauri::command]
-pub fn write_text(window: WebviewWindow, path: String, content: String, expected_modified: Option<u64>) -> Result<u64, String> {
+pub fn write_text(window: WebviewWindow, path: String, content: String, expected_modified: Option<u64>, expected_disk_stamp: Option<String>) -> Result<u64, String> {
     ensure_main(&window)?;
     let path = PathBuf::from(path);
     let extension = path.extension().unwrap_or_default().to_string_lossy().to_ascii_lowercase();
     let operation=crate::activity::Operation::new(match extension.as_str(){"html"=>"html_export","svg"=>"svg_export","json"=>"settings_export",_=>"document_save"},false);
     if !["md", "markdown", "mdown", "mkd", "txt", "html", "svg", "json"].contains(&extension.as_str()) { return Err("不支持的保存格式".into()); }
     if let Some(expected) = expected_modified {
-        if path.exists() && modified(&path) != expected { return Err("磁盘文件已被其他程序修改。请重新打开或另存为，避免覆盖外部修改。".into()); }
+        let matches = match expected_disk_stamp.as_deref().filter(|stamp| !stamp.is_empty()) {
+            Some(stamp) => fs::metadata(&path).ok().and_then(|metadata| disk_stamp(&metadata)).as_deref() == Some(stamp),
+            None => path.is_file() && modified(&path) == expected,
+        };
+        if !matches { return Err("磁盘文件已被其他程序修改或移除。请重新载入或另存为。".into()); }
     }
     atomic_write(&path, content.as_bytes())?;
     operation.finish(Ok(modified(&path)))

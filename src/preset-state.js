@@ -5,10 +5,15 @@ export async function documentDigest(markdown){
   const hash=await crypto.subtle.digest('SHA-256',bytes);
   return [...new Uint8Array(hash)].map(value=>value.toString(16).padStart(2,'0')).join('');
 }
+export function compareDiskVersion({ baseline, draft, incoming }) {
+  if (incoming === draft || incoming === baseline) return 'current';
+  if (!baseline) return 'unknown';
+  return draft === baseline ? 'clean' : 'edited';
+}
 export async function presetRefresh(draft,incoming,baseline){
   const [currentHash,incomingHash]=await Promise.all([documentDigest(draft),documentDigest(incoming)]);
-  if(currentHash===incomingHash||baseline===incomingHash)return {replace:false,backup:false,diskHash:incomingHash};
-  return {replace:true,backup:baseline!==currentHash,diskHash:incomingHash};
+  const kind=compareDiskVersion({baseline,draft:currentHash,incoming:incomingHash});
+  return {replace:kind!=='current',backup:kind==='edited'||kind==='unknown',diskHash:incomingHash};
 }
 // Exact hashes identify untouched defaults from versions that did not tag them.
 // Similar names or edited text are insufficient to reclassify a personal draft.

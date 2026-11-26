@@ -172,8 +172,10 @@ kbd { font: 11px "Segoe UI", sans-serif; color: var(--muted); }
 .document-tab:hover { color: var(--text); }
 .tab-label { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; height: 29px; padding: 0 6px 0 10px; font-size: 12px; }
 .tab-label > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab-close { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin: 0 5px 0 2px; border-radius: 2px; }
-.tab-close:hover { background: var(--hover); }
+.disk-change-dot { flex: 0 0 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.tab-close, .tab-disk-reload { display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; padding: 0; margin: 0 5px 0 2px; border-radius: 2px; }
+.tab-disk-reload { flex: 0 0 20px; margin-right: 0; color: var(--accent); }
+.tab-close:hover, .tab-disk-reload:hover { background: var(--hover); }
 .tab-new, .tab-refresh { width: 29px; flex-shrink: 0; padding: 3px; display: grid; place-items: center; color: var(--muted); }
 .tab-new:hover, .tab-refresh:hover { background: var(--hover); color: var(--text); }
 .tab-refresh { margin-left: auto; }
@@ -276,6 +278,12 @@ kbd { font: 11px "Segoe UI", sans-serif; color: var(--muted); }
 .rename-input input { border: 0; width: 100%; min-width: 0; padding: 1px; color: var(--text); background: transparent; outline: none; }
 .rename-input span { color: var(--muted); font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 23px; }
+.disk-change-dialog { width: 460px; margin: auto; }
+.disk-change-dialog::backdrop { background: #0008; }
+.disk-change-dialog h2 { margin-bottom: 11px; font-size: 18px; font-weight: 600; }
+.disk-change-dialog .disk-change-file { margin-bottom: 6px; color: var(--text); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.disk-change-dialog .disk-change-message { margin-bottom: 0; color: var(--text); }
+.disk-change-dialog .dialog-actions { flex-wrap: wrap; }
 .primary-button, .secondary-button, .danger-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 70px; min-height: 28px; padding: 4px 13px; border: 1px solid var(--border); border-radius: 2px; font-size: 12px; }
 .primary-button { background: #346d96; border-color: #5789ad; color: #fff; }
 .primary-button:not(:disabled):hover { background: #417fa9; }

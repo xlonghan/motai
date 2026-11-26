@@ -48,7 +48,10 @@ async function nativeSelection(path) {
   const document = await invoke('read_document', { path });
   return documentSelection(document);
 }
-function documentSelection(document){return {file:new File([document.markdown],document.name,{type:'text/markdown'}),reference:{path:document.path,modified:document.modified,managed:document.managed,preset:document.preset}};}
+function documentReference({path,modified,diskStamp,managed,preset}) {
+  return {path,modified,diskStamp,managed,preset};
+}
+function documentSelection(document){return {file:new File([document.markdown],document.name,{type:'text/markdown'}),reference:documentReference(document)};}
 
 async function saveExportPath(filename, extension) {
   const defaultPath=await invoke('default_save_path',{filename,extension});
@@ -73,7 +76,7 @@ export const platform = {
   async listPresets(){return native?invoke('list_presets'):[];},
   async openPreset(relativePath){return documentSelection(await invoke('read_preset',{relativePath}));},
   async createManagedDocument(name,content){return documentSelection(await invoke('create_managed_document',{name,content}));},
-  async renameManagedDocument(reference,name){const result=await invoke('rename_managed_document',{path:reference.path,name,expectedModified:reference.modified});return {name:result.name,reference:{path:result.path,modified:result.modified,managed:result.managed}};},
+  async renameManagedDocument(reference,name){const result=await invoke('rename_managed_document',{path:reference.path,name,expectedModified:reference.modified});return {name:result.name,reference:documentReference(result)};},
   async logEvent(event,outcome='ok',elapsedMs=null){if(native)await invoke('app_event',{event,outcome,elapsedMs}).catch(()=>{});},
   isOpeningDocuments:()=>desktopOpening>0,
   hasPendingImages(documentPath){return Boolean(documentPath)&&[...imagePending.keys()].some(key=>key.startsWith(`${documentPath}\n`));},
@@ -119,9 +122,10 @@ export const platform = {
   async saveMarkdown({ name, markdown, reference, saveAs }) {
     if (native) {
       const path = !saveAs && reference?.path ? reference.path : await saveExportPath(name, 'md');
-      await invoke('write_text', { path, content: markdown, expectedModified: !saveAs && path === reference?.path ? reference.modified : null });
+      const original = !saveAs && path === reference?.path ? reference : null;
+      await invoke('write_text', { path, content: markdown, expectedModified: original?.modified ?? null, expectedDiskStamp: original?.diskStamp ?? null });
       const document = await invoke('read_document', { path });
-      return { name: document.name, reference: { path: document.path, modified: document.modified,managed:document.managed,preset:document.preset }, message: 'Markdown 已保存到本地文件' };
+      return { name: document.name, reference: documentReference(document), diskMarkdown: document.markdown, message: 'Markdown 已保存到本地文件' };
     }
     let handle = saveAs ? null : reference;
     if (!handle && window.showSaveFilePicker) handle = await window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'Markdown 文档', accept: { 'text/markdown': ['.md'] } }] });
@@ -136,6 +140,7 @@ export const platform = {
   },
 
   async openDocumentPath(path) { return nativeSelection(path); },
+  async documentDiskStamps(paths) { return invoke('document_disk_stamps', { paths }); },
   async exportSvg(svg, filename) {
     if (native) {
       const path = await saveExportPath(filename, 'svg');
